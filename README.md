@@ -6,10 +6,6 @@
 
 ```bash
 python3 -m http.server 4174
-```
-
 Open:
 
-```text
 http://127.0.0.1:4174/index.html
-```
