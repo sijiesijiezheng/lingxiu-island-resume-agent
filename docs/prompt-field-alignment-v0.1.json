@@ -1,0 +1,142 @@
+{
+  "version": "0.1",
+  "source": "Notion: Prompt 字段对齐 v0.1",
+  "fieldNaming": "camelCase",
+  "mappings": [
+    {
+      "promptName": "开场分流",
+      "englishName": "Opening Router",
+      "stage": "START",
+      "inputFields": ["historyContext"],
+      "outputFields": [
+        "targetRole",
+        "targetRoleStatus",
+        "experienceStatus",
+        "experienceSeed",
+        "assistantMessage",
+        "quickReplies",
+        "nextState"
+      ],
+      "unifiedFieldNaming": "camelCase, e.g. targetRole",
+      "direction": "UI -> stateMachine",
+      "needChanges": false
+    },
+    {
+      "promptName": "经历盘点",
+      "englishName": "Experience Inventory",
+      "stage": "INVENTORY_SCREENING",
+      "inputFields": [
+        "targetRole",
+        "experienceStatus",
+        "selectedExperienceTypes",
+        "userFreeText"
+      ],
+      "outputFields": [
+        "recommendedExperienceType",
+        "experienceSeed",
+        "screeningReason",
+        "assistantMessage",
+        "quickReplies",
+        "nextState"
+      ],
+      "unifiedFieldNaming": "camelCase",
+      "direction": "UI -> stateMachine",
+      "needChanges": false
+    },
+    {
+      "promptName": "深挖追问",
+      "englishName": "Deep Dive",
+      "stage": "DEEP_DIVE_SCENE / DEEP_DIVE_ACTION / DEEP_DIVE_RESULT",
+      "inputFields": [
+        "targetRole",
+        "experienceSeed",
+        "currentExperience",
+        "missingInfoPriority"
+      ],
+      "outputFields": [
+        "fieldToFill",
+        "nextQuestion",
+        "updatedKnownFacts",
+        "isReadyForEvaluation",
+        "nextState"
+      ],
+      "unifiedFieldNaming": "camelCase",
+      "direction": "stateMachine -> UI",
+      "needChanges": false
+    },
+    {
+      "promptName": "价值评估",
+      "englishName": "Value Evaluation",
+      "stage": "VALUE_EVALUATION_MOCK",
+      "inputFields": [
+        "targetRole",
+        "experienceText",
+        "knownFacts",
+        "mode"
+      ],
+      "outputFields": [
+        "score",
+        "level",
+        "recommendedSection",
+        "isMainExperienceCandidate",
+        "dimensionScores",
+        "strengths",
+        "weaknesses",
+        "missingInfoPriority",
+        "nextQuestion",
+        "rewriteRisk",
+        "allowedPositioning",
+        "forbiddenClaims"
+      ],
+      "unifiedFieldNaming": "camelCase",
+      "direction": "stateMachine -> UI -> prompts.js",
+      "needChanges": false
+    },
+    {
+      "promptName": "简历转译",
+      "englishName": "Resume Translation",
+      "stage": "RESUME_TRANSLATION_MOCK",
+      "inputFields": [
+        "targetRole",
+        "currentExperience",
+        "evaluation",
+        "allowedPositioning",
+        "forbiddenClaims"
+      ],
+      "outputFields": [
+        "resumeBullets",
+        "experienceCard",
+        "usedFacts",
+        "riskWarnings",
+        "needsUserConfirmation",
+        "assistantMessage",
+        "nextState"
+      ],
+      "unifiedFieldNaming": "camelCase",
+      "direction": "stateMachine -> UI -> prompts.js",
+      "needChanges": false
+    },
+    {
+      "promptName": "补强建议/复盘",
+      "englishName": "Improvement / Review",
+      "stage": "USER_CONFIRMATION / OUTPUT_RESULT",
+      "inputFields": [
+        "resumeDraft",
+        "evaluation",
+        "weaknesses",
+        "missingInfoPriority",
+        "targetRole"
+      ],
+      "outputFields": [
+        "improvementSuggestions",
+        "nextQuestions",
+        "recommendedNextAction",
+        "assistantMessage",
+        "quickReplies"
+      ],
+      "unifiedFieldNaming": "camelCase",
+      "direction": "stateMachine -> UI",
+      "needChanges": false
+    }
+  ]
+}
