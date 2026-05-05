@@ -39,7 +39,7 @@ function bootApp() {
     window.setTimeout(() => renderAssistantResponse(response), delay);
   }
 
-  function submitUserInput(rawInput) {
+  async function submitUserInput(rawInput) {
     console.log("[app] send clicked", { rawInput });
     const userInput = rawInput.trim();
     if (!userInput) return;
@@ -49,7 +49,7 @@ function bootApp() {
     ui.clearQuickReplies();
     ui.triggerUserPulse();
 
-    const response = stateMachine.handleUserInput(userInput);
+    const response = await stateMachine.handleUserInput(userInput);
     renderAssistantResponseSoon(response);
   }
 

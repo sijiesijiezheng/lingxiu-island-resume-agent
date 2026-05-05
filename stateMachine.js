@@ -1,3 +1,11 @@
+import { callResumeTranslationApi } from "./realApi.js";
+import {
+  getDeepDiveActionMessage,
+  getDeepDiveResultMessage,
+  getDeepDiveSceneMessage,
+  isDeepDiveStuckInput,
+} from "./prompts.js";
+
 export const STATES = {
   START: "START",
   ASK_EXPERIENCE_STATUS: "ASK_EXPERIENCE_STATUS",
@@ -39,7 +47,37 @@ function createInitialData() {
     selectedExperienceTypes: [],
     experienceSeed: "",
     evaluationLevel: "",
+    readyToGenerate: false,
+    valueEvaluation: {
+      score: 0,
+      level: "",
+      recommendedSection: "",
+      isMainExperienceCandidate: false,
+      dimensionScores: {
+        scene: 0,
+        action: 0,
+        result: 0,
+        scale: 0,
+      },
+      strengths: [],
+      weaknesses: [],
+      missingInfoPriority: [],
+      nextQuestion: "",
+      rewriteRisk: "medium",
+      allowedPositioning: [],
+      forbiddenClaims: [],
+      readyToGenerate: false,
+    },
     resumeBullet: "",
+    resumeDraft: {
+      resumeBullets: [],
+      experienceCard: null,
+      usedFacts: [],
+      riskWarnings: [],
+      needsUserConfirmation: true,
+      source: "",
+    },
+    resumeTranslationFallbackUsed: false,
     userConfirmation: "",
     currentExperience: {
       scene: "",
@@ -70,13 +108,104 @@ function userHasExperience(input) {
   return clean.includes("有") || clean.includes("想写") || clean.includes("经历");
 }
 
-function buildResumeBullet(data) {
+function isMeaningfulCoreField(value) {
+  const clean = value.trim();
+  if (!clean) return false;
+  if (isDeepDiveStuckInput(clean)) return false;
+  return !["做过一点", "一点", "有一点", "不太记得", "随便做了点"].some((phrase) => clean.includes(phrase));
+}
+
+function createEmptyValueEvaluation() {
+  return {
+    score: 0,
+    level: "信息不足",
+    recommendedSection: "待补充",
+    isMainExperienceCandidate: false,
+    dimensionScores: {
+      scene: 0,
+      action: 0,
+      result: 0,
+      scale: 0,
+    },
+    strengths: [],
+    weaknesses: [],
+    missingInfoPriority: [],
+    nextQuestion: "",
+    rewriteRisk: "medium",
+    allowedPositioning: [],
+    forbiddenClaims: [
+      "主导",
+      "独立负责",
+      "显著提升",
+      "大幅增长",
+      "获奖",
+      "排名",
+      "转化率",
+      "用户增长",
+    ],
+    readyToGenerate: false,
+  };
+}
+
+function evaluateCurrentExperience(data) {
+  const evaluation = createEmptyValueEvaluation();
   const { scene, action, result, scale } = data.currentExperience;
-  return `在【${scene || "相关场景"}】中，协助完成【${action || "相关工作"}】，支持【${result || "后续使用"}】，涉及【${scale || "一定规模"}】。`;
+  const hasScene = isMeaningfulCoreField(scene);
+  const hasAction = isMeaningfulCoreField(action);
+  const hasResult = isMeaningfulCoreField(result);
+  const hasScale = isMeaningfulCoreField(scale);
+
+  evaluation.dimensionScores = {
+    scene: hasScene ? 18 : 0,
+    action: hasAction ? 18 : 0,
+    result: hasResult ? 18 : 0,
+    scale: hasScale ? 20 : 0,
+  };
+
+  evaluation.readyToGenerate = hasScene && hasAction && hasResult;
+  evaluation.score =
+    evaluation.dimensionScores.scene +
+    evaluation.dimensionScores.action +
+    evaluation.dimensionScores.result +
+    evaluation.dimensionScores.scale;
+
+  if (!hasScene) evaluation.missingInfoPriority.push("scene");
+  if (!hasAction) evaluation.missingInfoPriority.push("action");
+  if (!hasResult) evaluation.missingInfoPriority.push("result");
+  if (evaluation.readyToGenerate && !hasScale) evaluation.missingInfoPriority.push("scale");
+
+  evaluation.level = evaluation.readyToGenerate ? "可写经历" : "辅助经历";
+  evaluation.recommendedSection = evaluation.readyToGenerate ? "项目经历/校园经历" : "经历素材库";
+  evaluation.isMainExperienceCandidate = evaluation.readyToGenerate && evaluation.score >= 60;
+  evaluation.strengths = [
+    hasScene ? "已有明确场景" : "",
+    hasAction ? "已有真实动作" : "",
+    hasResult ? "已有用途或结果" : "",
+  ].filter(Boolean);
+  evaluation.weaknesses = [
+    !hasScene ? "缺少经历场景" : "",
+    !hasAction ? "缺少具体动作" : "",
+    !hasResult ? "缺少结果或用途" : "",
+    evaluation.readyToGenerate && !hasScale ? "缺少规模或周期信息" : "",
+  ].filter(Boolean);
+  evaluation.nextQuestion =
+    evaluation.missingInfoPriority[0] === "scale"
+      ? "这件事大概涉及多少人、多少份资料、几次活动，或者持续了多久？大概数也可以。"
+      : "";
+  evaluation.rewriteRisk = evaluation.readyToGenerate ? "low" : "medium";
+  evaluation.allowedPositioning = [
+    data.targetRole,
+    evaluation.level,
+    "项目协作",
+    "资料整理",
+    "执行支持",
+  ].filter(Boolean);
+
+  return evaluation;
 }
 
 function buildOutputMessage(data) {
-  const bullet = data.resumeBullet || buildResumeBullet(data);
+  const bullet = data.resumeDraft.resumeBullets[0] || data.resumeBullet || "暂未生成经历草稿。";
   const { scene, action, result, scale } = data.currentExperience;
 
   return `这一段我们先整理成这样：
@@ -126,6 +255,76 @@ export function createStateMachine() {
     };
   }
 
+  function createResumeTranslationInput() {
+    return {
+      targetRole: state.data.targetRole,
+      currentExperience: cloneData(state.data.currentExperience),
+      allowedPositioning: state.data.valueEvaluation.allowedPositioning,
+      forbiddenClaims: state.data.valueEvaluation.forbiddenClaims,
+      evaluation: {
+        level: state.data.evaluationLevel,
+        readyToGenerate: state.data.readyToGenerate,
+        score: state.data.valueEvaluation.score,
+        missingInfoPriority: state.data.valueEvaluation.missingInfoPriority,
+      },
+    };
+  }
+
+  async function translateResumeDraft() {
+    const result = await callResumeTranslationApi(createResumeTranslationInput());
+    state.data.resumeDraft = result.resumeDraft;
+    state.data.resumeTranslationFallbackUsed = Boolean(result.fallbackUsed);
+    state.data.resumeBullet = result.resumeDraft.resumeBullets[0] || "";
+    return result;
+  }
+
+  async function makeResumeTranslationResponse() {
+    await translateResumeDraft();
+    return makeResponse({
+      assistantMessage: `我先试着把它写成简历语言，你看看像不像你做过的事：
+
+- ${state.data.resumeBullet}
+
+这句话基本符合事实吗？`,
+      quickReplyOptions: quickReplies.USER_CONFIRMATION,
+      nextState: STATES.USER_CONFIRMATION,
+    });
+  }
+
+  function makeCoreFieldFollowupResponse() {
+    const missing = state.data.valueEvaluation.missingInfoPriority[0];
+
+    if (missing === "scene") {
+      return makeResponse({
+        assistantMessage: getDeepDiveSceneMessage("不知道"),
+        nextState: STATES.DEEP_DIVE_SCENE,
+      });
+    }
+
+    if (missing === "action") {
+      return makeResponse({
+        assistantMessage: getDeepDiveActionMessage("不知道"),
+        nextState: STATES.DEEP_DIVE_ACTION,
+      });
+    }
+
+    return makeResponse({
+      assistantMessage: getDeepDiveResultMessage("不知道"),
+      nextState: STATES.DEEP_DIVE_RESULT,
+    });
+  }
+
+  function makeSingleEnhancementFollowupResponse() {
+    const question =
+      state.data.valueEvaluation.nextQuestion ||
+      "这件事大概涉及多少人、多少份资料、几次活动，或者持续了多久？大概数也可以。";
+
+    return makeResponse({
+      assistantMessage: `这段经历已经够写一版基础简历了。为了让它更具体，我只再补一个小问题：\n\n${question}`,
+      nextState: STATES.MISSING_INFO_FOLLOWUP,
+    });
+  }
+
   function getInitialResponse() {
     return makeResponse({
       assistantMessage: "我们先不急着写完整简历。你现在大概想投哪类岗位？不确定也可以，先做一版通用简历。",
@@ -134,7 +333,7 @@ export function createStateMachine() {
     });
   }
 
-  function handleUserInput(userText) {
+  async function handleUserInput(userText) {
     const input = userText.trim();
     state.conversation.push({ role: "user", content: input, state: state.currentState });
 
@@ -151,7 +350,7 @@ export function createStateMachine() {
         state.data.experienceStatus = input;
         if (userHasExperience(input)) {
           return makeResponse({
-            assistantMessage: "可以，我们先不急着写漂亮。我先帮你把它拆清楚：这件事当时发生在什么场景里？",
+            assistantMessage: getDeepDiveSceneMessage(input),
             nextState: STATES.DEEP_DIVE_SCENE,
           });
         }
@@ -171,51 +370,65 @@ export function createStateMachine() {
       case STATES.SELECT_EXPERIENCE:
         state.data.experienceSeed = input;
         return makeResponse({
-          assistantMessage: "可以，我们先不急着写漂亮。我先帮你把它拆清楚：这件事当时发生在什么场景里？",
+          assistantMessage: getDeepDiveSceneMessage(input),
           nextState: STATES.DEEP_DIVE_SCENE,
         });
 
       case STATES.DEEP_DIVE_SCENE:
+        if (isDeepDiveStuckInput(input)) {
+          return makeResponse({
+            assistantMessage: getDeepDiveSceneMessage(input),
+            nextState: STATES.DEEP_DIVE_SCENE,
+          });
+        }
         state.data.currentExperience.scene = input;
         return makeResponse({
-          assistantMessage: "你当时具体做了什么？可以只说一个最小的动作，比如整理、核对、沟通、发布、记录。",
+          assistantMessage: getDeepDiveActionMessage(input),
           nextState: STATES.DEEP_DIVE_ACTION,
         });
 
       case STATES.DEEP_DIVE_ACTION:
+        if (isDeepDiveStuckInput(input)) {
+          return makeResponse({
+            assistantMessage: getDeepDiveActionMessage(input),
+            nextState: STATES.DEEP_DIVE_ACTION,
+          });
+        }
         state.data.currentExperience.action = input;
         return makeResponse({
-          assistantMessage: "你做完之后，这件事后来给谁用了？或者产生了什么结果？没有明确结果也可以说不确定。",
+          assistantMessage: getDeepDiveResultMessage(input),
           nextState: STATES.DEEP_DIVE_RESULT,
         });
 
       case STATES.DEEP_DIVE_RESULT: {
+        if (isDeepDiveStuckInput(input)) {
+          return makeResponse({
+            assistantMessage: getDeepDiveResultMessage(input),
+            nextState: STATES.DEEP_DIVE_RESULT,
+          });
+        }
         state.data.currentExperience.result = input;
-        const { scene, action, result } = state.data.currentExperience;
-        state.data.evaluationLevel = scene.trim() && action.trim() && result.trim() ? "可写经历" : "辅助经历";
-        const evaluationMessage =
-          state.data.evaluationLevel === "可写经历"
-            ? "这段经历可以写，只是还需要补一点具体信息。我再问你一个小问题，把它写得更实一点。"
-            : "这件事可以先作为辅助经历记录下来。我们再补一个细节，看看能不能写得更具体。";
+        state.data.valueEvaluation = evaluateCurrentExperience(state.data);
+        state.data.readyToGenerate = state.data.valueEvaluation.readyToGenerate;
+        state.data.evaluationLevel = state.data.valueEvaluation.level;
 
-        return makeResponse({
-          assistantMessage: `${evaluationMessage}\n\n这件事大概涉及多少人、多少份资料、几次活动，或者持续了多久？大概数也可以。`,
-          nextState: STATES.MISSING_INFO_FOLLOWUP,
-        });
+        if (!state.data.readyToGenerate) {
+          return makeCoreFieldFollowupResponse();
+        }
+
+        if (state.data.valueEvaluation.score < 60) {
+          return makeSingleEnhancementFollowupResponse();
+        }
+
+        return makeResumeTranslationResponse();
       }
 
       case STATES.MISSING_INFO_FOLLOWUP:
         state.data.currentExperience.scale = input;
-        state.data.resumeBullet = buildResumeBullet(state.data);
-        return makeResponse({
-          assistantMessage: `我先试着把它写成简历语言，你看看像不像你做过的事：
-
-- ${state.data.resumeBullet}
-
-这句话基本符合事实吗？`,
-          quickReplyOptions: quickReplies.USER_CONFIRMATION,
-          nextState: STATES.USER_CONFIRMATION,
-        });
+        state.data.valueEvaluation = evaluateCurrentExperience(state.data);
+        state.data.readyToGenerate = state.data.valueEvaluation.readyToGenerate;
+        state.data.evaluationLevel = state.data.valueEvaluation.level;
+        return makeResumeTranslationResponse();
 
       case STATES.USER_CONFIRMATION: {
         state.data.userConfirmation = input;
@@ -235,7 +448,18 @@ export function createStateMachine() {
           state.data.experienceStatus = input;
           state.data.experienceSeed = "";
           state.data.evaluationLevel = "";
+          state.data.readyToGenerate = false;
+          state.data.valueEvaluation = createEmptyValueEvaluation();
           state.data.resumeBullet = "";
+          state.data.resumeDraft = {
+            resumeBullets: [],
+            experienceCard: null,
+            usedFacts: [],
+            riskWarnings: [],
+            needsUserConfirmation: true,
+            source: "",
+          };
+          state.data.resumeTranslationFallbackUsed = false;
           state.data.userConfirmation = "";
           state.data.currentExperience = { scene: "", action: "", result: "", scale: "" };
           return makeResponse({
@@ -247,8 +471,19 @@ export function createStateMachine() {
         if (input.includes("重新")) {
           state.data.currentExperience = { scene: "", action: "", result: "", scale: "" };
           state.data.resumeBullet = "";
+          state.data.readyToGenerate = false;
+          state.data.valueEvaluation = createEmptyValueEvaluation();
+          state.data.resumeDraft = {
+            resumeBullets: [],
+            experienceCard: null,
+            usedFacts: [],
+            riskWarnings: [],
+            needsUserConfirmation: true,
+            source: "",
+          };
+          state.data.resumeTranslationFallbackUsed = false;
           return makeResponse({
-            assistantMessage: "可以，我们重新拆这一段：这件事当时发生在什么场景里？",
+            assistantMessage: getDeepDiveSceneMessage(input),
             nextState: STATES.DEEP_DIVE_SCENE,
           });
         }
