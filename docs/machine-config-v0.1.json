@@ -1,0 +1,130 @@
+{
+  "version": "0.1",
+  "source": "stateMachine.js",
+  "states": {
+    "START": {
+      "visualStage": 1,
+      "assistantMessage": "我们先不急着写完整简历。你现在大概想投哪类岗位？不确定也可以，先做一版通用简历。",
+      "quickReplies": ["运营/新媒体/内容", "行政/助理/文职", "产品/项目助理", "教育/教务/培训", "暂时不确定"],
+      "writes": [],
+      "next": {
+        "onInitialResponse": "START",
+        "onUserInput": "ASK_EXPERIENCE_STATUS"
+      }
+    },
+    "ASK_EXPERIENCE_STATUS": {
+      "visualStage": 2,
+      "assistantMessage": "好，我先按这个方向帮你看。你现在有一段想写进简历的经历吗？有的话随便说一句就行；没有的话我帮你一起找。",
+      "quickReplies": ["有，我想写一段经历", "没有/不确定，帮我找找", "我只有很普通的小事"],
+      "writes": ["data.targetRole"],
+      "next": {
+        "ifUserHasExperience": "DEEP_DIVE_SCENE",
+        "ifUserHasNoExperienceOrUncertain": "INVENTORY_SCREENING"
+      }
+    },
+    "INVENTORY_SCREENING": {
+      "visualStage": 3,
+      "assistantMessage": "没关系，很多能写进简历的事，一开始都不像经历。下面哪些你做过？可以选 1-3 个。",
+      "quickReplies": ["课程作业/小组项目", "社团/班级事务", "帮老师或同学做事", "兼职/实习", "账号运营/内容发布", "志愿活动/校园活动", "自己做过的小作品", "都不确定"],
+      "writes": ["data.experienceStatus"],
+      "next": {
+        "onUserInput": "SELECT_EXPERIENCE"
+      }
+    },
+    "SELECT_EXPERIENCE": {
+      "visualStage": 3,
+      "assistantMessage": "我们先从最具体的一件小事开始。你选的这些里面，有没有一件你还记得比较清楚？随便说一句就行。",
+      "quickReplies": [],
+      "writes": ["data.selectedExperienceTypes"],
+      "next": {
+        "onUserInput": "DEEP_DIVE_SCENE"
+      }
+    },
+    "DEEP_DIVE_SCENE": {
+      "visualStage": 4,
+      "assistantMessage": "可以，我们先不急着写漂亮。我先帮你把它拆清楚：这件事当时发生在什么场景里？",
+      "quickReplies": [],
+      "writes": ["data.experienceSeed"],
+      "next": {
+        "onUserInput": "DEEP_DIVE_ACTION"
+      }
+    },
+    "DEEP_DIVE_ACTION": {
+      "visualStage": 4,
+      "assistantMessage": "你当时具体做了什么？可以只说一个最小的动作，比如整理、核对、沟通、发布、记录。",
+      "quickReplies": [],
+      "writes": ["data.currentExperience.scene"],
+      "next": {
+        "onUserInput": "DEEP_DIVE_RESULT"
+      }
+    },
+    "DEEP_DIVE_RESULT": {
+      "visualStage": 4,
+      "assistantMessage": "你做完之后，这件事后来给谁用了？或者产生了什么结果？没有明确结果也可以说不确定。",
+      "quickReplies": [],
+      "writes": ["data.currentExperience.action"],
+      "next": {
+        "onUserInput": "MISSING_INFO_FOLLOWUP"
+      }
+    },
+    "MISSING_INFO_FOLLOWUP": {
+      "visualStage": 4,
+      "assistantMessage": "{{evaluationMessage}}\\n\\n这件事大概涉及多少人、多少份资料、几次活动，或者持续了多久？大概数也可以。",
+      "quickReplies": [],
+      "writes": ["data.currentExperience.result", "data.evaluationLevel"],
+      "next": {
+        "onUserInput": "USER_CONFIRMATION"
+      }
+    },
+    "USER_CONFIRMATION": {
+      "visualStage": 5,
+      "assistantMessage": "我先试着把它写成简历语言，你看看像不像你做过的事：\\n\\n- {{data.resumeBullet}}\\n\\n这句话基本符合事实吗？",
+      "quickReplies": ["基本符合", "有点夸大", "还需要改"],
+      "writes": ["data.currentExperience.scale", "data.resumeBullet"],
+      "next": {
+        "onUserInput": "OUTPUT_RESULT"
+      }
+    },
+    "OUTPUT_RESULT": {
+      "visualStage": 5,
+      "assistantMessage": "{{buildOutputMessage(data)}}",
+      "quickReplies": ["继续补第二段经历", "先生成简历", "重新整理这一段"],
+      "writes": ["data.userConfirmation"],
+      "next": {
+        "ifInputIncludesContinue": "INVENTORY_SCREENING",
+        "ifInputIncludesRestart": "DEEP_DIVE_SCENE",
+        "otherwise": "OUTPUT_RESULT"
+      }
+    }
+  },
+  "helpers": {
+    "parseExperienceTypes": {
+      "input": "string",
+      "output": "string[]",
+      "rule": "Split by Chinese comma, English comma, enumeration comma, or newline; trim; remove empty; keep first 3."
+    },
+    "userHasExperience": {
+      "input": "string",
+      "output": "boolean",
+      "rule": "Return false if input includes 没有, 不确定, or 普通. Return true if input includes 有, 想写, or 经历."
+    },
+    "buildResumeBullet": {
+      "template": "在【{{scene || \"相关场景\"}}】中，协助完成【{{action || \"相关工作\"}}】，支持【{{result || \"后续使用\"}}】，涉及【{{scale || \"一定规模\"}}】。"
+    }
+  },
+  "dataShape": {
+    "targetRole": "string",
+    "experienceStatus": "string",
+    "selectedExperienceTypes": "string[]",
+    "experienceSeed": "string",
+    "evaluationLevel": "string",
+    "resumeBullet": "string",
+    "userConfirmation": "string",
+    "currentExperience": {
+      "scene": "string",
+      "action": "string",
+      "result": "string",
+      "scale": "string"
+    }
+  }
+}

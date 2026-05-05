@@ -40,82 +40,18 @@ const stageMap = {
   OUTPUT_RESULT: 5,
 };
 
-function createInitialData() {
+function createEmptyCurrentExperience() {
   return {
-    targetRole: "",
-    experienceStatus: "",
-    selectedExperienceTypes: [],
-    experienceSeed: "",
-    evaluationLevel: "",
-    readyToGenerate: false,
-    valueEvaluation: {
-      score: 0,
-      level: "",
-      recommendedSection: "",
-      isMainExperienceCandidate: false,
-      dimensionScores: {
-        scene: 0,
-        action: 0,
-        result: 0,
-        scale: 0,
-      },
-      strengths: [],
-      weaknesses: [],
-      missingInfoPriority: [],
-      nextQuestion: "",
-      rewriteRisk: "medium",
-      allowedPositioning: [],
-      forbiddenClaims: [],
-      readyToGenerate: false,
-    },
-    resumeBullet: "",
-    resumeDraft: {
-      resumeBullets: [],
-      experienceCard: null,
-      usedFacts: [],
-      riskWarnings: [],
-      needsUserConfirmation: true,
-      source: "",
-    },
-    resumeTranslationFallbackUsed: false,
-    userConfirmation: "",
-    currentExperience: {
-      scene: "",
-      action: "",
-      result: "",
-      scale: "",
-    },
+    scene: "",
+    action: "",
+    result: "",
+    scale: "",
+    knownFacts: [],
+    missingInfoPriority: "",
   };
 }
 
-function cloneData(data) {
-  return JSON.parse(JSON.stringify(data));
-}
-
-function parseExperienceTypes(input) {
-  const clean = input.trim();
-  if (!clean) return [];
-  return clean
-    .split(/[，,、\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .slice(0, 3);
-}
-
-function userHasExperience(input) {
-  const clean = input.trim();
-  if (clean.includes("没有") || clean.includes("不确定") || clean.includes("普通")) return false;
-  return clean.includes("有") || clean.includes("想写") || clean.includes("经历");
-}
-
-function isMeaningfulCoreField(value) {
-  const clean = value.trim();
-  if (!clean) return false;
-  if (isDeepDiveStuckInput(clean)) return false;
-  return !["做过一点", "一点", "有一点", "不太记得", "随便做了点"].some((phrase) => clean.includes(phrase));
-}
-
-function createEmptyValueEvaluation() {
+function createEmptyEvaluation() {
   return {
     score: 0,
     level: "信息不足",
@@ -147,9 +83,77 @@ function createEmptyValueEvaluation() {
   };
 }
 
-function evaluateCurrentExperience(data) {
-  const evaluation = createEmptyValueEvaluation();
-  const { scene, action, result, scale } = data.currentExperience;
+function createInitialSchema() {
+  return {
+    session: {
+      currentState: STATES.START,
+      stage: STATES.START,
+      mode: "",
+      conversation: [],
+    },
+    userProfile: {
+      targetRoleStatus: "",
+      targetRole: "",
+    },
+    experienceDiscovery: {
+      experienceStatus: "",
+      selectedExperienceTypes: [],
+      recommendedExperienceType: "",
+      experienceSeed: "",
+      screeningReason: "",
+    },
+    currentExperience: createEmptyCurrentExperience(),
+    evaluation: createEmptyEvaluation(),
+    resumeDraft: {
+      resumeBullets: [],
+      experienceCard: null,
+      usedFacts: [],
+      riskWarnings: [],
+      needsUserConfirmation: false,
+      userConfirmation: "",
+      source: "",
+    },
+    nextAction: {
+      recommendedNextAction: "",
+      nextQuestions: [],
+      quickReplies: [],
+    },
+    runtime: {
+      resumeTranslationFallbackUsed: false,
+    },
+  };
+}
+
+function cloneData(data) {
+  return JSON.parse(JSON.stringify(data));
+}
+
+function parseExperienceTypes(input) {
+  const clean = input.trim();
+  if (!clean) return [];
+  return clean
+    .split(/[，,、\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function userHasExperience(input) {
+  const clean = input.trim();
+  if (clean.includes("没有") || clean.includes("不确定") || clean.includes("普通")) return false;
+  return clean.includes("有") || clean.includes("想写") || clean.includes("经历");
+}
+
+function isMeaningfulCoreField(value) {
+  const clean = value.trim();
+  if (!clean) return false;
+  if (isDeepDiveStuckInput(clean)) return false;
+  return !["做过一点", "一点", "有一点", "不太记得", "随便做了点"].some((phrase) => clean.includes(phrase));
+}
+
+function evaluateCurrentExperience(schema) {
+  const evaluation = createEmptyEvaluation();
+  const { scene, action, result, scale } = schema.currentExperience;
   const hasScene = isMeaningfulCoreField(scene);
   const hasAction = isMeaningfulCoreField(action);
   const hasResult = isMeaningfulCoreField(result);
@@ -161,7 +165,6 @@ function evaluateCurrentExperience(data) {
     result: hasResult ? 18 : 0,
     scale: hasScale ? 20 : 0,
   };
-
   evaluation.readyToGenerate = hasScene && hasAction && hasResult;
   evaluation.score =
     evaluation.dimensionScores.scene +
@@ -173,6 +176,9 @@ function evaluateCurrentExperience(data) {
   if (!hasAction) evaluation.missingInfoPriority.push("action");
   if (!hasResult) evaluation.missingInfoPriority.push("result");
   if (evaluation.readyToGenerate && !hasScale) evaluation.missingInfoPriority.push("scale");
+
+  schema.currentExperience.missingInfoPriority = evaluation.missingInfoPriority[0] || "";
+  schema.currentExperience.knownFacts = [scene, action, result, scale].filter(Boolean);
 
   evaluation.level = evaluation.readyToGenerate ? "可写经历" : "辅助经历";
   evaluation.recommendedSection = evaluation.readyToGenerate ? "项目经历/校园经历" : "经历素材库";
@@ -194,7 +200,7 @@ function evaluateCurrentExperience(data) {
       : "";
   evaluation.rewriteRisk = evaluation.readyToGenerate ? "low" : "medium";
   evaluation.allowedPositioning = [
-    data.targetRole,
+    schema.userProfile.targetRole,
     evaluation.level,
     "项目协作",
     "资料整理",
@@ -204,9 +210,13 @@ function evaluateCurrentExperience(data) {
   return evaluation;
 }
 
-function buildOutputMessage(data) {
-  const bullet = data.resumeDraft.resumeBullets[0] || data.resumeBullet || "暂未生成经历草稿。";
-  const { scene, action, result, scale } = data.currentExperience;
+function getPrimaryResumeBullet(schema) {
+  return schema.resumeDraft.resumeBullets[0] || "";
+}
+
+function buildOutputMessage(schema) {
+  const bullet = getPrimaryResumeBullet(schema) || "暂未生成经历草稿。";
+  const { scene, action, result, scale } = schema.currentExperience;
 
   return `这一段我们先整理成这样：
 
@@ -214,7 +224,7 @@ function buildOutputMessage(data) {
 - ${bullet}
 
 已提取信息：
-- 目标方向：${data.targetRole || "暂未确定"}
+- 目标方向：${schema.userProfile.targetRole || "暂未确定"}
 - 经历场景：${scene || "暂未填写"}
 - 具体动作：${action || "暂未填写"}
 - 结果/用途：${result || "暂未填写"}
@@ -224,26 +234,17 @@ function buildOutputMessage(data) {
 }
 
 export function createStateMachine() {
-  const state = {
-    currentState: STATES.START,
-    stage: STATES.START,
-    data: createInitialData(),
-    conversation: [],
-  };
+  const schema = createInitialSchema();
 
   function dataSnapshot() {
-    return cloneData({
-      currentState: state.currentState,
-      stage: state.stage,
-      data: state.data,
-      conversation: state.conversation,
-    });
+    return cloneData(schema);
   }
 
   function makeResponse({ assistantMessage, quickReplyOptions = [], nextState, stage = nextState }) {
-    state.currentState = nextState;
-    state.stage = stage;
-    state.conversation.push({ role: "assistant", content: assistantMessage, state: nextState });
+    schema.session.currentState = nextState;
+    schema.session.stage = stage;
+    schema.session.conversation.push({ role: "assistant", content: assistantMessage, state: nextState });
+    schema.nextAction.quickReplies = [...quickReplyOptions];
 
     return {
       assistantMessage,
@@ -257,24 +258,27 @@ export function createStateMachine() {
 
   function createResumeTranslationInput() {
     return {
-      targetRole: state.data.targetRole,
-      currentExperience: cloneData(state.data.currentExperience),
-      allowedPositioning: state.data.valueEvaluation.allowedPositioning,
-      forbiddenClaims: state.data.valueEvaluation.forbiddenClaims,
+      targetRole: schema.userProfile.targetRole,
+      currentExperience: cloneData(schema.currentExperience),
+      allowedPositioning: schema.evaluation.allowedPositioning,
+      forbiddenClaims: schema.evaluation.forbiddenClaims,
       evaluation: {
-        level: state.data.evaluationLevel,
-        readyToGenerate: state.data.readyToGenerate,
-        score: state.data.valueEvaluation.score,
-        missingInfoPriority: state.data.valueEvaluation.missingInfoPriority,
+        level: schema.evaluation.level,
+        readyToGenerate: schema.evaluation.readyToGenerate,
+        score: schema.evaluation.score,
+        missingInfoPriority: schema.evaluation.missingInfoPriority,
       },
     };
   }
 
   async function translateResumeDraft() {
     const result = await callResumeTranslationApi(createResumeTranslationInput());
-    state.data.resumeDraft = result.resumeDraft;
-    state.data.resumeTranslationFallbackUsed = Boolean(result.fallbackUsed);
-    state.data.resumeBullet = result.resumeDraft.resumeBullets[0] || "";
+    schema.resumeDraft = {
+      ...schema.resumeDraft,
+      ...result.resumeDraft,
+      userConfirmation: schema.resumeDraft.userConfirmation,
+    };
+    schema.runtime.resumeTranslationFallbackUsed = Boolean(result.fallbackUsed);
     return result;
   }
 
@@ -283,7 +287,7 @@ export function createStateMachine() {
     return makeResponse({
       assistantMessage: `我先试着把它写成简历语言，你看看像不像你做过的事：
 
-- ${state.data.resumeBullet}
+- ${getPrimaryResumeBullet(schema)}
 
 这句话基本符合事实吗？`,
       quickReplyOptions: quickReplies.USER_CONFIRMATION,
@@ -292,7 +296,7 @@ export function createStateMachine() {
   }
 
   function makeCoreFieldFollowupResponse() {
-    const missing = state.data.valueEvaluation.missingInfoPriority[0];
+    const missing = schema.evaluation.missingInfoPriority[0];
 
     if (missing === "scene") {
       return makeResponse({
@@ -316,7 +320,7 @@ export function createStateMachine() {
 
   function makeSingleEnhancementFollowupResponse() {
     const question =
-      state.data.valueEvaluation.nextQuestion ||
+      schema.evaluation.nextQuestion ||
       "这件事大概涉及多少人、多少份资料、几次活动，或者持续了多久？大概数也可以。";
 
     return makeResponse({
@@ -335,11 +339,12 @@ export function createStateMachine() {
 
   async function handleUserInput(userText) {
     const input = userText.trim();
-    state.conversation.push({ role: "user", content: input, state: state.currentState });
+    schema.session.conversation.push({ role: "user", content: input, state: schema.session.currentState });
 
-    switch (state.currentState) {
+    switch (schema.session.currentState) {
       case STATES.START:
-        state.data.targetRole = input;
+        schema.userProfile.targetRole = input;
+        schema.userProfile.targetRoleStatus = input.includes("不确定") || input.includes("暂时") ? "uncertain" : "known";
         return makeResponse({
           assistantMessage: "好，我先按这个方向帮你看。你现在有一段想写进简历的经历吗？有的话随便说一句就行；没有的话我帮你一起找。",
           quickReplyOptions: quickReplies.ASK_EXPERIENCE_STATUS,
@@ -347,7 +352,7 @@ export function createStateMachine() {
         });
 
       case STATES.ASK_EXPERIENCE_STATUS:
-        state.data.experienceStatus = input;
+        schema.experienceDiscovery.experienceStatus = input;
         if (userHasExperience(input)) {
           return makeResponse({
             assistantMessage: getDeepDiveSceneMessage(input),
@@ -361,14 +366,14 @@ export function createStateMachine() {
         });
 
       case STATES.INVENTORY_SCREENING:
-        state.data.selectedExperienceTypes = parseExperienceTypes(input);
+        schema.experienceDiscovery.selectedExperienceTypes = parseExperienceTypes(input);
         return makeResponse({
           assistantMessage: "我们先从最具体的一件小事开始。你选的这些里面，有没有一件你还记得比较清楚？随便说一句就行。",
           nextState: STATES.SELECT_EXPERIENCE,
         });
 
       case STATES.SELECT_EXPERIENCE:
-        state.data.experienceSeed = input;
+        schema.experienceDiscovery.experienceSeed = input;
         return makeResponse({
           assistantMessage: getDeepDiveSceneMessage(input),
           nextState: STATES.DEEP_DIVE_SCENE,
@@ -381,7 +386,7 @@ export function createStateMachine() {
             nextState: STATES.DEEP_DIVE_SCENE,
           });
         }
-        state.data.currentExperience.scene = input;
+        schema.currentExperience.scene = input;
         return makeResponse({
           assistantMessage: getDeepDiveActionMessage(input),
           nextState: STATES.DEEP_DIVE_ACTION,
@@ -394,7 +399,7 @@ export function createStateMachine() {
             nextState: STATES.DEEP_DIVE_ACTION,
           });
         }
-        state.data.currentExperience.action = input;
+        schema.currentExperience.action = input;
         return makeResponse({
           assistantMessage: getDeepDiveResultMessage(input),
           nextState: STATES.DEEP_DIVE_RESULT,
@@ -407,16 +412,14 @@ export function createStateMachine() {
             nextState: STATES.DEEP_DIVE_RESULT,
           });
         }
-        state.data.currentExperience.result = input;
-        state.data.valueEvaluation = evaluateCurrentExperience(state.data);
-        state.data.readyToGenerate = state.data.valueEvaluation.readyToGenerate;
-        state.data.evaluationLevel = state.data.valueEvaluation.level;
+        schema.currentExperience.result = input;
+        schema.evaluation = evaluateCurrentExperience(schema);
 
-        if (!state.data.readyToGenerate) {
+        if (!schema.evaluation.readyToGenerate) {
           return makeCoreFieldFollowupResponse();
         }
 
-        if (state.data.valueEvaluation.score < 60) {
+        if (schema.evaluation.score < 60) {
           return makeSingleEnhancementFollowupResponse();
         }
 
@@ -424,20 +427,18 @@ export function createStateMachine() {
       }
 
       case STATES.MISSING_INFO_FOLLOWUP:
-        state.data.currentExperience.scale = input;
-        state.data.valueEvaluation = evaluateCurrentExperience(state.data);
-        state.data.readyToGenerate = state.data.valueEvaluation.readyToGenerate;
-        state.data.evaluationLevel = state.data.valueEvaluation.level;
+        schema.currentExperience.scale = input;
+        schema.evaluation = evaluateCurrentExperience(schema);
         return makeResumeTranslationResponse();
 
       case STATES.USER_CONFIRMATION: {
-        state.data.userConfirmation = input;
+        schema.resumeDraft.userConfirmation = input;
         const prefix =
           input.includes("夸大") || input.includes("改")
             ? "好，我们先不硬写。我会把它降一点表达，保留真实动作。\n\n"
             : "";
         return makeResponse({
-          assistantMessage: `${prefix}${buildOutputMessage(state.data)}`,
+          assistantMessage: `${prefix}${buildOutputMessage(schema)}`,
           quickReplyOptions: quickReplies.OUTPUT_RESULT,
           nextState: STATES.OUTPUT_RESULT,
         });
@@ -445,23 +446,20 @@ export function createStateMachine() {
 
       case STATES.OUTPUT_RESULT:
         if (input.includes("继续")) {
-          state.data.experienceStatus = input;
-          state.data.experienceSeed = "";
-          state.data.evaluationLevel = "";
-          state.data.readyToGenerate = false;
-          state.data.valueEvaluation = createEmptyValueEvaluation();
-          state.data.resumeBullet = "";
-          state.data.resumeDraft = {
+          schema.experienceDiscovery.experienceStatus = input;
+          schema.experienceDiscovery.experienceSeed = "";
+          schema.evaluation = createEmptyEvaluation();
+          schema.resumeDraft = {
             resumeBullets: [],
             experienceCard: null,
             usedFacts: [],
             riskWarnings: [],
-            needsUserConfirmation: true,
+            needsUserConfirmation: false,
+            userConfirmation: "",
             source: "",
           };
-          state.data.resumeTranslationFallbackUsed = false;
-          state.data.userConfirmation = "";
-          state.data.currentExperience = { scene: "", action: "", result: "", scale: "" };
+          schema.runtime.resumeTranslationFallbackUsed = false;
+          schema.currentExperience = createEmptyCurrentExperience();
           return makeResponse({
             assistantMessage: "好，我们继续找第二段。下面哪些你做过？可以选 1-3 个。",
             quickReplyOptions: quickReplies.INVENTORY_SCREENING,
@@ -469,19 +467,18 @@ export function createStateMachine() {
           });
         }
         if (input.includes("重新")) {
-          state.data.currentExperience = { scene: "", action: "", result: "", scale: "" };
-          state.data.resumeBullet = "";
-          state.data.readyToGenerate = false;
-          state.data.valueEvaluation = createEmptyValueEvaluation();
-          state.data.resumeDraft = {
+          schema.currentExperience = createEmptyCurrentExperience();
+          schema.evaluation = createEmptyEvaluation();
+          schema.resumeDraft = {
             resumeBullets: [],
             experienceCard: null,
             usedFacts: [],
             riskWarnings: [],
-            needsUserConfirmation: true,
+            needsUserConfirmation: false,
+            userConfirmation: "",
             source: "",
           };
-          state.data.resumeTranslationFallbackUsed = false;
+          schema.runtime.resumeTranslationFallbackUsed = false;
           return makeResponse({
             assistantMessage: getDeepDiveSceneMessage(input),
             nextState: STATES.DEEP_DIVE_SCENE,
@@ -496,7 +493,7 @@ export function createStateMachine() {
       default:
         return makeResponse({
           assistantMessage: "这一步先停一下。你可以继续补充刚才那段经历，我会按真实信息往下拆。",
-          nextState: state.currentState,
+          nextState: schema.session.currentState,
         });
     }
   }
