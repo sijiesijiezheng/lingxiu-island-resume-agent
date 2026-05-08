@@ -1,0 +1,253 @@
+[
+  {
+    "caseId": "C01",
+    "userType": "目标不明确用户",
+    "inputs": ["暂时不确定"],
+    "expected": {
+      "intent": "uncertain",
+      "statePath": ["START", "ASK_EXPERIENCE_STATUS"],
+      "schemaFields": {
+        "userProfile.targetRoleStatus": "uncertain",
+        "userProfile.targetRole": "",
+        "inputInterpretation.hasTargetRole": false
+      },
+      "mustContain": [
+        "可以先做通用版本",
+        "后面再贴具体岗位"
+      ],
+      "mustNotContain": [
+        "按这个方向帮你看"
+      ],
+      "acceptanceCriteria": [
+        "Input Interpreter 将目标状态识别为 uncertain。",
+        "assistantMessage 不把“暂时不确定”当成具体岗位方向。",
+        "系统能继续推进到经历状态判断，而不是卡在 START。"
+      ]
+    }
+  },
+  {
+    "caseId": "C02",
+    "userType": "目标明确用户",
+    "inputs": ["我想做运营/新媒体/内容"],
+    "expected": {
+      "intent": "provide_target_role",
+      "statePath": ["START", "ASK_EXPERIENCE_STATUS"],
+      "schemaFields": {
+        "userProfile.targetRoleStatus": "known",
+        "userProfile.targetRole": "运营/新媒体/内容",
+        "inputInterpretation.hasTargetRole": true
+      },
+      "mustContainAny": [
+        "内容敏感度",
+        "信息整理",
+        "发布执行",
+        "基础数据意识"
+      ],
+      "mustNotContain": [
+        "不确定也可以"
+      ],
+      "acceptanceCriteria": [
+        "targetRole 被写入 schema。",
+        "assistantMessage 先承接岗位方向，再推进经历判断。",
+        "承接内容能体现运营/新媒体/内容岗位相关能力。"
+      ]
+    }
+  },
+  {
+    "caseId": "C03",
+    "userType": "反问型用户",
+    "inputs": ["做过一个小组PPT算吗？"],
+    "expected": {
+      "intent": "ask_validation",
+      "statePath": ["ASK_EXPERIENCE_STATUS", "DEEP_DIVE_SCENE"],
+      "schemaFields": {
+        "inputInterpretation.hasExperience": true,
+        "inputInterpretation.needsReassurance": true,
+        "experienceDiscovery.experienceSeed": "小组PPT"
+      },
+      "mustContainAny": [
+        "算",
+        "可以拆",
+        "先不用判断强不强"
+      ],
+      "mustNotContain": [
+        "下面哪些你做过",
+        "你选的这些里面",
+        "重新选一段"
+      ],
+      "acceptanceCriteria": [
+        "Input Interpreter 识别为 hasExperience=true。",
+        "experienceSeed 包含“小组PPT”。",
+        "直接进入 DEEP_DIVE，不再要求用户重新选择经历类型。"
+      ]
+    }
+  },
+  {
+    "caseId": "C04",
+    "userType": "低信心用户",
+    "inputs": ["有一段经历，但是很水，没什么实际成效"],
+    "expected": {
+      "intent": "ask_validation",
+      "statePath": ["ASK_EXPERIENCE_STATUS", "DEEP_DIVE_SCENE"],
+      "schemaFields": {
+        "inputInterpretation.hasExperience": true,
+        "inputInterpretation.experienceConfidence": "low",
+        "inputInterpretation.needsReassurance": true
+      },
+      "mustContainAny": [
+        "先不急着判断强不强",
+        "不一定没价值",
+        "我们先拆一下"
+      ],
+      "mustNotContain": [
+        "这不算经历",
+        "请选择经历类型",
+        "下面哪些你做过"
+      ],
+      "acceptanceCriteria": [
+        "系统先接住用户低信心表达。",
+        "不进入经历盘点卡片。",
+        "下一步围绕动作和结果进行低压力深挖。"
+      ]
+    }
+  },
+  {
+    "caseId": "C05",
+    "userType": "信息错位用户",
+    "context": {
+      "currentState": "DEEP_DIVE_SCENE",
+      "systemAskedFor": "scene"
+    },
+    "inputs": ["我负责写文案"],
+    "expected": {
+      "intent": "provide_info",
+      "statePath": ["DEEP_DIVE_SCENE", "DEEP_DIVE_SCENE"],
+      "schemaFields": {
+        "currentExperience.action": "撰写文案",
+        "currentExperience.role": "负责文案",
+        "currentExperience.scene": ""
+      },
+      "mustContainAny": [
+        "文案这块记下来了",
+        "文案先记下",
+        "再补一个小背景"
+      ],
+      "mustNotContain": [
+        "你当时主要负责哪一部分",
+        "具体做了什么",
+        "发生在什么场景里"
+      ],
+      "acceptanceCriteria": [
+        "Field Reconciler 将输入抽取为 action/role。",
+        "不把“我负责写文案”误写入 scene。",
+        "下一轮继续补 scene，而不是重复问 action。"
+      ]
+    }
+  },
+  {
+    "caseId": "C06",
+    "userType": "信息丰富用户",
+    "inputs": ["我在社团负责发布抖音宣传视频，写文案，最后有10万浏览量"],
+    "expected": {
+      "intent": "provide_experience",
+      "statePath": [
+        "ASK_EXPERIENCE_STATUS",
+        "VALUE_EVALUATION_MOCK",
+        "RESUME_TRANSLATION_MOCK"
+      ],
+      "schemaFields": {
+        "experienceDiscovery.experienceSeed": "抖音宣传视频",
+        "currentExperience.scene": "社团宣传",
+        "currentExperience.action": "发布抖音宣传视频，撰写文案",
+        "currentExperience.resultMetric": "单条内容约10万浏览量",
+        "generationPolicy.canGenerateFormalBullet": true
+      },
+      "mustContainAny": [
+        "10万浏览量",
+        "文案",
+        "社团宣传"
+      ],
+      "mustNotContain": [
+        "你当时主要负责哪一部分",
+        "这件事发生在什么场景里",
+        "10万浏览量作为规模/周期"
+      ],
+      "acceptanceCriteria": [
+        "系统吸收 scene/action/resultMetric 等多个字段。",
+        "浏览量进入 resultMetric，不进入 scale。",
+        "不重复追问已经回答过的字段。",
+        "信息足够时进入 VALUE_EVALUATION，或最多只补一个关键增强字段。"
+      ]
+    }
+  },
+  {
+    "caseId": "C07",
+    "userType": "低质量输入用户",
+    "inputs": ["我帮忙做了一些事情"],
+    "expected": {
+      "intent": "provide_info",
+      "statePath": ["DEEP_DIVE_ACTION", "VALUE_EVALUATION_MOCK", "RECOVERY"],
+      "schemaFields": {
+        "generationPolicy.gateStatus": "recoverable",
+        "generationPolicy.canGenerateFormalBullet": false,
+        "generationPolicy.recoveryType": "low_quality_field",
+        "generationPolicy.lowQualityFields": ["action"]
+      },
+      "mustContainAny": [
+        "具体是哪一个小动作",
+        "整理",
+        "核对",
+        "沟通",
+        "发布"
+      ],
+      "mustNotContain": [
+        "RESUME_TRANSLATION",
+        "正式简历 bullet",
+        "在【】中"
+      ],
+      "acceptanceCriteria": [
+        "Generation Policy 不把低质量字段视为可生成。",
+        "canGenerateFormalBullet=false。",
+        "系统进入 Recovery，追问更具体动作。",
+        "不允许直接进入正式 RESUME_TRANSLATION。"
+      ]
+    }
+  },
+  {
+    "caseId": "C08",
+    "userType": "连续卡住用户",
+    "inputs": ["不知道", "没有", "想不起来"],
+    "expected": {
+      "intent": "uncertain",
+      "statePath": [
+        "DEEP_DIVE_SCENE",
+        "DEEP_DIVE_SCENE",
+        "GUIDANCE_ONLY"
+      ],
+      "schemaFields": {
+        "session.stuckCount": 3,
+        "generationPolicy.gateStatus": "fail",
+        "generationPolicy.canGenerateFormalBullet": false,
+        "generationPolicy.fallbackMode": "save_as_lead",
+        "generationPolicy.outputType": "experience_lead"
+      },
+      "mustContainAny": [
+        "我们先换个最低门槛入口",
+        "可以先记成线索",
+        "课程作业",
+        "小组展示"
+      ],
+      "mustNotContain": [
+        "正在生成简历",
+        "正式简历 bullet",
+        "同一句兜底连续重复"
+      ],
+      "acceptanceCriteria": [
+        "连续卡住时不重复同一句兜底。",
+        "触发二级降级策略。",
+        "最终进入 experience_lead 或 guidance_only。",
+        "不生成正式 bullet。"
+      ]
+    }
+  }
+]
