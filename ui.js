@@ -115,6 +115,7 @@ export function initUI() {
   const micButton = getElement("#micButton");
   const sendButton = getElement("#sendButton");
   const voiceStatus = getElement("#voiceStatus");
+  const stageLabel = getElement("#stageLabel");
   const stageDots = [...document.querySelectorAll(".stage-dot")];
 
   console.log("[ui] send button found", Boolean(sendButton));
@@ -232,7 +233,145 @@ export function initUI() {
     input.style.height = `${Math.min(input.scrollHeight, 132)}px`;
   }
 
+  function cleanDisplayText(value = "") {
+    return String(value || "")
+      .replace(/算吗/g, "")
+      .replace(/就是/g, "")
+      .replace(/刚才那个/g, "")
+      .replace(/刚才/g, "")
+      .replace(/嗯+/g, "")
+      .replace(/我负责/g, "负责")
+      .replace(/有一个有/g, "获得")
+      .replace(/我们组/g, "小组")
+      .replace(/有(\d+万浏览量)/g, "约$1")
+      .replace(/我们创业课老师让做的[，,、]*/g, "创业课程")
+      .replace(/创业课老师让做的[，,、]*/g, "创业课程")
+      .replace(/老师让做的[，,、]*/g, "")
+      .replace(/介绍自己卖的东西/g, "产品展示")
+      .replace(/\s+/g, "")
+      .replace(/^[，,、。]+|[，,、。]+$/g, "")
+      .slice(0, 46);
+  }
+
+  function displayScene(value = "") {
+    const text = String(value || "");
+    if (/创业课|创业课程|老师让做|产品展示|介绍自己卖的东西/.test(text)) return "创业课程产品展示短视频";
+    if (/社团|宣传活动|社团宣传/.test(text)) return "社团活动宣传内容";
+    if (/抖音|短视频/.test(text)) return "抖音短视频内容发布";
+    return cleanDisplayText(text) || "未补充";
+  }
+
+  function displayAction(value = "") {
+    const text = String(value || "");
+    if (/抖音|短视频/.test(text) && /文案|标题/.test(text)) return "撰写抖音短视频文案";
+    if (/发布/.test(text) && /抖音|短视频/.test(text)) return "发布抖音短视频";
+    return cleanDisplayText(text) || "未补充";
+  }
+
+  function displayResultUse(snapshot = {}) {
+    const experience = snapshot.currentExperience || {};
+    const combined = [experience.scene, experience.action, experience.result].join(" ");
+    if (/创业课|创业课程|产品展示|介绍自己卖的东西/.test(combined)) return "支持小组完成产品展示";
+    if (/社团|宣传活动|社团宣传/.test(combined)) return "用于社团活动宣传";
+    const cleaned = cleanDisplayText(experience.result);
+    if (/浏览|播放/.test(cleaned)) return "未补充";
+    return cleaned || "未补充";
+  }
+
+  function displayResultMetric(snapshot = {}) {
+    const experience = snapshot.currentExperience || {};
+    const combined = [experience.resultMetric, experience.result, experience.scale].join(" ");
+    const match = combined.match(/(?:约)?(?:\d+(?:\.\d+)?|十|百|千|万)+\s*万?[^，,。]*?(?:浏览量|浏览|播放量|播放|观看|阅读)/);
+    if (!match) return "未补充";
+    let metric = cleanDisplayText(match[0]).replace(/^有/, "").replace(/^获得/, "").replace(/浏览$/, "浏览量");
+    if (!metric.startsWith("约") && /10万|十万/.test(metric)) metric = `约${metric}`;
+    if (!metric.includes("单条内容")) metric = `单条内容${metric}`;
+    return metric;
+  }
+
+  function displayScale(snapshot = {}) {
+    const scale = cleanDisplayText(snapshot.currentExperience?.scale || "");
+    if (!scale || /浏览|播放|观看|阅读/.test(scale)) return "未补充";
+    return scale;
+  }
+
+  function parseOutputResultText(text = "") {
+    const lines = String(text || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    const fieldValue = (label) => {
+      const line = lines.find((item) => item.startsWith(`- ${label}：`));
+      return line ? line.replace(`- ${label}：`, "").trim() : "";
+    };
+    const bulletIndex = lines.findIndex((line) => line === "经历草稿：");
+    const bullet = bulletIndex >= 0 ? (lines[bulletIndex + 1] || "").replace(/^- /, "").trim() : "";
+
+    return {
+      resumeDraft: { resumeBullets: bullet ? [bullet] : [] },
+      userProfile: { targetRole: fieldValue("目标方向") },
+      currentExperience: {
+        scene: fieldValue("经历场景"),
+        action: fieldValue("具体动作"),
+        result: fieldValue("结果/用途"),
+        resultMetric: fieldValue("结果数据"),
+        scale: fieldValue("规模/周期") === "未补充" ? "" : fieldValue("规模/周期"),
+      },
+    };
+  }
+
+  function createSummaryItem(label, value) {
+    const item = document.createElement("div");
+    item.className = "draft-summary-item";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const detail = document.createElement("strong");
+    detail.textContent = value || "未补充";
+    item.append(name, detail);
+    return item;
+  }
+
+  function renderResultCard(snapshot = {}) {
+    const row = document.createElement("article");
+    row.className = "message-row ai result-row";
+
+    const avatar = document.createElement("span");
+    avatar.className = "avatar";
+    row.append(avatar);
+
+    const card = document.createElement("section");
+    card.className = "draft-card";
+    card.setAttribute("aria-label", "经历草稿");
+
+    const label = document.createElement("p");
+    label.className = "draft-card-label";
+    label.textContent = "经历草稿";
+
+    const bullet = document.createElement("p");
+    bullet.className = "draft-bullet";
+    bullet.textContent = snapshot.resumeDraft?.resumeBullets?.[0] || "这段经历已先保存为线索，后续可以继续补具体场景、动作和用途。";
+
+    const summary = document.createElement("div");
+    summary.className = "draft-summary";
+    summary.append(
+      createSummaryItem("目标方向", cleanDisplayText(snapshot.userProfile?.targetRole || "") || "未确定"),
+      createSummaryItem("经历场景", displayScene(snapshot.currentExperience?.scene || "")),
+      createSummaryItem("具体动作", displayAction(snapshot.currentExperience?.action || "")),
+      createSummaryItem("结果/用途", displayResultUse(snapshot)),
+      createSummaryItem("结果数据", displayResultMetric(snapshot)),
+      createSummaryItem("规模/周期", displayScale(snapshot)),
+    );
+
+    card.append(label, bullet, summary);
+    row.append(card);
+    messages.append(row);
+    scrollChatArea();
+  }
+
   function renderMessage(role, text) {
+    if (role === "ai" && String(text || "").includes("经历草稿：") && String(text || "").includes("已提取信息：")) {
+      if (stageLabel) stageLabel.textContent = "经历草稿已生成";
+      renderResultCard(parseOutputResultText(text));
+      return;
+    }
+
     const row = document.createElement("article");
     row.className = `message-row ${role}`;
 
@@ -256,8 +395,10 @@ export function initUI() {
       const button = document.createElement("button");
       button.className = "quick-reply";
       button.type = "button";
-      button.textContent = reply;
+      const displayReply = reply === "生成经历草稿" ? "保存这段经历草稿" : reply;
+      button.textContent = displayReply;
       button.dataset.reply = reply;
+      button.dataset.displayReply = displayReply;
       quickReplies.append(button);
     });
   }
@@ -303,13 +444,23 @@ export function initUI() {
     micButton.disabled = disabled;
   }
 
-  function updateVisualStage(stage) {
+  function stageText(stage, state = "") {
+    if (state === "OUTPUT_RESULT") return "经历草稿已生成";
+    if (state === "USER_CONFIRMATION" || stage === 5) return "正在生成经历草稿";
+    if (state === "DEEP_DIVE_SCENE" || state === "DEEP_DIVE_ACTION" || state === "DEEP_DIVE_RESULT" || stage === 4) return "正在深挖细节";
+    if (stage === 3) return "正在找经历";
+    if (stage === 2) return "正在确认方向";
+    return "正在启动";
+  }
+
+  function updateVisualStage(stage, state = "") {
     currentStage = stage;
     stageDots.forEach((dot, index) => {
       const active = index < stage;
       dot.classList.toggle("is-active", active);
       dot.classList.toggle("is-warm", active && stage === 5);
     });
+    if (stageLabel) stageLabel.textContent = stageText(stage, state);
   }
 
   function triggerUserPulse() {
@@ -344,6 +495,9 @@ export function initUI() {
       if (!button) return;
       const reply = button.dataset.reply || button.textContent;
       console.log("[ui] quick reply clicked", reply);
+      if (button.dataset.displayReply === "保存这段经历草稿") {
+        updateRecordingStatus("已保存为当前经历草稿。");
+      }
       handler(reply);
     });
   }
