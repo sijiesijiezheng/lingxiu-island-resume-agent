@@ -40,6 +40,28 @@ const stageMap = {
   OUTPUT_RESULT: 5,
 };
 
+const flowCommands = {
+  HAS_EXPERIENCE: "有，我想写一段经历",
+  FIND_EXPERIENCE: "没有/不确定，帮我找找",
+  ORDINARY_THINGS: "我只有很普通的小事",
+  CONTINUE_SECOND: "继续补第二段经历",
+  SAVE_DRAFT: "保存这段经历草稿",
+  SHOW_DRAFT: "生成经历草稿",
+  REWORK: "重新整理这一段",
+  CONFIRM_OK: "基本符合",
+  CONFIRM_OVERSTATED: "有点夸大",
+  CONFIRM_NEEDS_EDIT: "还需要改",
+};
+
+const broadExperienceTypeMap = [
+  { tokens: ["实习", "兼职", "兼职/实习"], label: "兼职/实习" },
+  { tokens: ["社团", "班级", "社团/班级事务"], label: "社团/班级事务" },
+  { tokens: ["课程作业", "课程", "小组项目", "课程作业/小组项目"], label: "课程作业/小组项目" },
+  { tokens: ["账号运营", "内容发布", "账号运营/内容发布"], label: "账号运营/内容发布" },
+  { tokens: ["志愿活动", "校园活动", "志愿活动/校园活动"], label: "志愿活动/校园活动" },
+  { tokens: ["作品", "小作品", "自己做过的小作品"], label: "自己做过的小作品" },
+];
+
 function createEmptyCurrentExperience() {
   return {
     scene: "",
@@ -171,8 +193,44 @@ function countOccurrences(text, phrase) {
   return String(text || "").split(phrase).length - 1;
 }
 
+function normalizeCommandText(input = "") {
+  return String(input || "").trim().replace(/\s/g, "");
+}
+
+function isFlowCommand(input, command) {
+  return normalizeCommandText(input) === normalizeCommandText(command);
+}
+
+function isAskExperienceSeedCommand(input) {
+  return isFlowCommand(input, flowCommands.HAS_EXPERIENCE);
+}
+
+function isInventoryEntryCommand(input) {
+  return isFlowCommand(input, flowCommands.FIND_EXPERIENCE) || isFlowCommand(input, flowCommands.ORDINARY_THINGS);
+}
+
+function getBroadExperienceType(input = "") {
+  const normalized = normalizeCommandText(input);
+  if (!normalized) return "";
+
+  for (const item of broadExperienceTypeMap) {
+    if (item.tokens.some((token) => normalizeCommandText(token) === normalized)) {
+      return item.label;
+    }
+  }
+
+  return "";
+}
+
+function makeAskExperienceSeedMessage() {
+  return "可以，那你先随便说一句这段经历是什么。比如是哪段实习、哪个课程项目、哪个活动里的一件小事？";
+}
+
 function makeInventorySelectionMessage(selectedTypes = []) {
   const primaryType = selectedTypes[0] || "这个方向";
+  if (primaryType.includes("实习") || primaryType.includes("兼职")) {
+    return "可以，先从这类经历里挑一件最具体的小事。比如实习里你整理过资料、做过表格、沟通过信息，或者协助过一次活动？随便说一个就行。";
+  }
   if (primaryType.includes("账号") || primaryType.includes("内容")) {
     return "可以，账号运营/内容发布这个方向可以拆。你先想一个最具体的内容动作，比如发布过一条抖音或小红书、写过一篇推文、剪过一段视频，随便说一句就行。";
   }
@@ -828,6 +886,39 @@ export function createStateMachine() {
       }
 
       case STATES.ASK_EXPERIENCE_STATUS: {
+        if (isAskExperienceSeedCommand(input)) {
+          resetStuckCount(STATES.ASK_EXPERIENCE_STATUS);
+          schema.experienceDiscovery.experienceStatus = "has_experience";
+          schema.experienceDiscovery.experienceSeed = "";
+          return makeResponse({
+            assistantMessage: makeAskExperienceSeedMessage(),
+            nextState: STATES.SELECT_EXPERIENCE,
+          });
+        }
+
+        if (isInventoryEntryCommand(input)) {
+          const count = incrementStuckCount(STATES.ASK_EXPERIENCE_STATUS);
+          schema.experienceDiscovery.experienceStatus = isFlowCommand(input, flowCommands.ORDINARY_THINGS)
+            ? "ordinary"
+            : "uncertain_or_none";
+          return makeInventoryEntryResponse({
+            count,
+            message: "没关系，很多能写进简历的事，一开始都不像经历。你可以先从下面这些低压力入口里选 1-3 个。",
+          });
+        }
+
+        const broadType = getBroadExperienceType(input);
+        if (broadType) {
+          resetStuckCount(STATES.ASK_EXPERIENCE_STATUS);
+          schema.experienceDiscovery.experienceStatus = "experience_type_selected";
+          schema.experienceDiscovery.selectedExperienceTypes = [broadType];
+          schema.experienceDiscovery.experienceSeed = "";
+          return makeResponse({
+            assistantMessage: makeInventorySelectionMessage([broadType]),
+            nextState: STATES.SELECT_EXPERIENCE,
+          });
+        }
+
         const interpretation = await interpretUserInput(input);
         applyInterpretationToSchema(interpretation, input);
 
@@ -863,6 +954,18 @@ export function createStateMachine() {
       }
 
       case STATES.INVENTORY_SCREENING: {
+        const broadType = getBroadExperienceType(input);
+        if (broadType) {
+          resetStuckCount(STATES.INVENTORY_SCREENING);
+          schema.experienceDiscovery.experienceStatus = "experience_type_selected";
+          schema.experienceDiscovery.selectedExperienceTypes = [broadType];
+          schema.experienceDiscovery.experienceSeed = "";
+          return makeResponse({
+            assistantMessage: makeInventorySelectionMessage([broadType]),
+            nextState: STATES.SELECT_EXPERIENCE,
+          });
+        }
+
         const interpretation = await interpretUserInput(input);
         applyInterpretationToSchema(interpretation, input);
         const reconciliation = await reconcileUserInput(input, interpretation);
@@ -911,12 +1014,38 @@ export function createStateMachine() {
       }
 
       case STATES.SELECT_EXPERIENCE: {
+        if (isAskExperienceSeedCommand(input)) {
+          schema.experienceDiscovery.experienceStatus = "has_experience";
+          schema.experienceDiscovery.experienceSeed = "";
+          return makeResponse({
+            assistantMessage: makeAskExperienceSeedMessage(),
+            nextState: STATES.SELECT_EXPERIENCE,
+          });
+        }
+
+        const broadType = getBroadExperienceType(input);
+        if (broadType) {
+          resetStuckCount(STATES.SELECT_EXPERIENCE);
+          schema.experienceDiscovery.experienceStatus = "experience_type_selected";
+          schema.experienceDiscovery.selectedExperienceTypes = [broadType];
+          schema.experienceDiscovery.experienceSeed = "";
+          return makeResponse({
+            assistantMessage: makeInventorySelectionMessage([broadType]),
+            nextState: STATES.SELECT_EXPERIENCE,
+          });
+        }
+
         const interpretation = await interpretUserInput(input);
         applyInterpretationToSchema(interpretation, input);
         const reconciliation = await reconcileUserInput(input, interpretation);
 
         if (isInterpretedStuck(interpretation) || interpretation.shouldStayInCurrentState) {
           const count = incrementStuckCount(STATES.SELECT_EXPERIENCE);
+          if (count >= 3) {
+            schema.runtime.generationPolicyRecoveryCount = 3;
+            schema.evaluation = evaluateCurrentExperience(schema);
+            return handleEvaluatedExperience();
+          }
           return makeResponse({
             assistantMessage: makeInventoryStuckMessage(count),
             quickReplyOptions: count >= 2 ? quickReplies.INVENTORY_SCREENING : [],
@@ -1115,7 +1244,7 @@ export function createStateMachine() {
             nextState: STATES.DEEP_DIVE_SCENE,
           });
         }
-        if (input.includes("生成经历草稿")) {
+        if (input.includes("生成经历草稿") || input.includes("保存这段经历草稿")) {
           return makeResponse({
             assistantMessage: buildOutputMessage(schema),
             quickReplyOptions: quickReplies.OUTPUT_RESULT,
