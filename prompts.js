@@ -151,6 +151,8 @@ export const fieldReconcilerPrompt = `
    - 人数、周期、资料份数写入 scale
    - 浏览量、播放量、点赞数写入 resultMetric
    - 不要把浏览量写入 scale。
+   - 如果这些数字出现在复合句里，例如“社团招新时核对名单，涉及6人，一周，最后整理了120份报名表”，也必须同时抽取：
+     scene="社团招新"，action 包含“核对名单”，scale 包含“6人 / 一周 / 120份报名表”，resultMetric 保持空。
 7. 用户说“我在社团负责发布抖音宣传视频，写文案，最后有10万浏览量”：
    - scene="社团宣传"
    - experienceSeed="抖音宣传视频"

@@ -209,6 +209,18 @@ function isInventoryEntryCommand(input) {
   return isFlowCommand(input, flowCommands.FIND_EXPERIENCE) || isFlowCommand(input, flowCommands.ORDINARY_THINGS);
 }
 
+function isMixedExperienceInput(input = "") {
+  const normalized = normalizeCommandText(input);
+  const hasInternship = /实习|客户表|客户信息/.test(normalized);
+  const hasClubContent = /社团|抖音|视频|账号|内容/.test(normalized);
+  const hasConnector = /也|还|同时|另外|，|,|、/.test(input);
+  return hasInternship && hasClubContent && hasConnector;
+}
+
+function makeMixedExperienceChoiceMessage() {
+  return "这里其实有两段经历，我们先选一件最具体的小事来写。你想先写实习里的客户表整理，还是社团抖音发布？";
+}
+
 function getBroadExperienceType(input = "") {
   const normalized = normalizeCommandText(input);
   if (!normalized) return "";
@@ -865,6 +877,18 @@ export function createStateMachine() {
 
     switch (schema.session.currentState) {
       case STATES.START: {
+        if (isMixedExperienceInput(input)) {
+          resetStuckCount(STATES.START);
+          schema.userProfile.targetRoleStatus = "uncertain";
+          schema.experienceDiscovery.experienceStatus = "multiple_experience_candidates";
+          schema.experienceDiscovery.selectedExperienceTypes = ["兼职/实习", "账号运营/内容发布"];
+          schema.experienceDiscovery.experienceSeed = "";
+          return makeResponse({
+            assistantMessage: makeMixedExperienceChoiceMessage(),
+            nextState: STATES.SELECT_EXPERIENCE,
+          });
+        }
+
         const interpretation = await interpretUserInput(input);
         applyInterpretationToSchema(interpretation, input);
         resetStuckCount(STATES.START);
@@ -886,6 +910,17 @@ export function createStateMachine() {
       }
 
       case STATES.ASK_EXPERIENCE_STATUS: {
+        if (isMixedExperienceInput(input)) {
+          resetStuckCount(STATES.ASK_EXPERIENCE_STATUS);
+          schema.experienceDiscovery.experienceStatus = "multiple_experience_candidates";
+          schema.experienceDiscovery.selectedExperienceTypes = ["兼职/实习", "账号运营/内容发布"];
+          schema.experienceDiscovery.experienceSeed = "";
+          return makeResponse({
+            assistantMessage: makeMixedExperienceChoiceMessage(),
+            nextState: STATES.SELECT_EXPERIENCE,
+          });
+        }
+
         if (isAskExperienceSeedCommand(input)) {
           resetStuckCount(STATES.ASK_EXPERIENCE_STATUS);
           schema.experienceDiscovery.experienceStatus = "has_experience";
@@ -922,9 +957,19 @@ export function createStateMachine() {
         const interpretation = await interpretUserInput(input);
         applyInterpretationToSchema(interpretation, input);
 
-        if (interpretation.shouldGoToDeepDive || interpretation.hasExperience) {
+        if (isInterpretedStuck(interpretation)) {
+          const count = incrementStuckCount(STATES.ASK_EXPERIENCE_STATUS);
+          return makeInventoryEntryResponse({
+            count,
+            message: count > 1
+              ? makeStuckGuidance(STATES.INVENTORY_SCREENING, count)
+            : "没关系，很多能写进简历的事，一开始都不像经历。你可以先从下面这些低压力入口里选 1-3 个。",
+          });
+        }
+
+        const reconciliation = await reconcileUserInput(input, interpretation);
+        if (interpretation.shouldGoToDeepDive || interpretation.hasExperience || hasExtractedFields(reconciliation)) {
           resetStuckCount(STATES.ASK_EXPERIENCE_STATUS);
-          const reconciliation = await reconcileUserInput(input, interpretation);
           if (hasCoreReadyForEvaluation(schema)) {
             schema.evaluation = evaluateCurrentExperience(schema);
             return handleEvaluatedExperience();
@@ -937,16 +982,6 @@ export function createStateMachine() {
           });
         }
 
-        if (isInterpretedStuck(interpretation)) {
-          const count = incrementStuckCount(STATES.ASK_EXPERIENCE_STATUS);
-          return makeInventoryEntryResponse({
-            count,
-            message: count > 1
-              ? makeStuckGuidance(STATES.INVENTORY_SCREENING, count)
-              : "没关系，很多能写进简历的事，一开始都不像经历。你可以先从下面这些低压力入口里选 1-3 个。",
-          });
-        }
-
         resetStuckCount(STATES.ASK_EXPERIENCE_STATUS);
         return makeInventoryEntryResponse({
           message: "很多能写进简历的事，一开始都不像经历。你可以先从下面这些低压力入口里选 1-3 个。",
@@ -954,6 +989,17 @@ export function createStateMachine() {
       }
 
       case STATES.INVENTORY_SCREENING: {
+        if (isMixedExperienceInput(input)) {
+          resetStuckCount(STATES.INVENTORY_SCREENING);
+          schema.experienceDiscovery.experienceStatus = "multiple_experience_candidates";
+          schema.experienceDiscovery.selectedExperienceTypes = ["兼职/实习", "账号运营/内容发布"];
+          schema.experienceDiscovery.experienceSeed = "";
+          return makeResponse({
+            assistantMessage: makeMixedExperienceChoiceMessage(),
+            nextState: STATES.SELECT_EXPERIENCE,
+          });
+        }
+
         const broadType = getBroadExperienceType(input);
         if (broadType) {
           resetStuckCount(STATES.INVENTORY_SCREENING);
@@ -1014,6 +1060,17 @@ export function createStateMachine() {
       }
 
       case STATES.SELECT_EXPERIENCE: {
+        if (isMixedExperienceInput(input)) {
+          resetStuckCount(STATES.SELECT_EXPERIENCE);
+          schema.experienceDiscovery.experienceStatus = "multiple_experience_candidates";
+          schema.experienceDiscovery.selectedExperienceTypes = ["兼职/实习", "账号运营/内容发布"];
+          schema.experienceDiscovery.experienceSeed = "";
+          return makeResponse({
+            assistantMessage: makeMixedExperienceChoiceMessage(),
+            nextState: STATES.SELECT_EXPERIENCE,
+          });
+        }
+
         if (isAskExperienceSeedCommand(input)) {
           schema.experienceDiscovery.experienceStatus = "has_experience";
           schema.experienceDiscovery.experienceSeed = "";
@@ -1038,6 +1095,9 @@ export function createStateMachine() {
         const interpretation = await interpretUserInput(input);
         applyInterpretationToSchema(interpretation, input);
         const reconciliation = await reconcileUserInput(input, interpretation);
+        if (schema.experienceDiscovery.selectedExperienceTypes.length && !schema.currentExperience.scene) {
+          schema.currentExperience.scene = schema.experienceDiscovery.selectedExperienceTypes[0];
+        }
 
         if (isInterpretedStuck(interpretation) || interpretation.shouldStayInCurrentState) {
           const count = incrementStuckCount(STATES.SELECT_EXPERIENCE);
@@ -1054,6 +1114,7 @@ export function createStateMachine() {
         }
 
         resetStuckCount(STATES.SELECT_EXPERIENCE);
+        if (!hasExtractedFields(reconciliation)) applySemanticFields(input, "action");
         schema.experienceDiscovery.experienceSeed = interpretation.experienceSeed || input;
         const inferred = inferConcreteExperienceFromInput(input);
         if (inferred.isConcrete) {

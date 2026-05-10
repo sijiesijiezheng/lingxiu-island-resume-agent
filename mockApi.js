@@ -250,10 +250,24 @@ export function getMockFieldReconcilerResponse(promptInput = {}) {
     fields.resultMetric = "单条内容约10万浏览量";
     fields.experienceSeed = "抖音宣传视频";
     response.acknowledgement = "社团抖音宣传视频、文案动作和传播数据都记下来了。";
+  } else if (
+    includesAny(normalized, ["社团招新", "社团"]) &&
+    includesAny(normalized, ["核对名单", "核对"]) &&
+    includesAny(normalized, ["6人", "一周", "120份", "报名表"])
+  ) {
+    fields.scene = "社团招新";
+    fields.action = "核对报名名单";
+    fields.result = "支持社团招新报名信息整理";
+    fields.scale = ["6人", "一周", "120份报名表"].filter((item) => normalized.includes(item.replace("报名表", "")) || normalized.includes(item)).join("，");
+    fields.experienceSeed = "社团招新名单核对";
+    response.acknowledgement = "社团招新、名单核对和资料规模都记下来了。";
   } else if (/^(我)?(主要)?负责写文案$/.test(normalized) || normalized === "我负责文案") {
     fields.action = "撰写内容文案";
     fields.role = "负责文案";
     response.acknowledgement = "文案这块记下来了。";
+  } else if (includesAny(normalized, ["帮忙做了一些事情", "做了一些事情", "帮忙做"])) {
+    fields.action = "帮忙做了一些事情";
+    response.acknowledgement = "这个动作先记下来了，但还需要再具体一点。";
   } else if (includesAny(normalized, ["发布抖音", "发抖音", "抖音"]) && includesAny(normalized, ["浏览", "播放", "10万", "十万"])) {
     fields.experienceSeed = "发布抖音短视频";
     fields.resultMetric = "单条内容约10万浏览量";
